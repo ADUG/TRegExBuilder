@@ -32,11 +32,20 @@ type
     class function AnyWhiteSpace : TCharSet; static;
     class function NonWhiteSpace : TCharSet; static;
     class function Space: TCharSet; static;
+    class function FullStop: TCharSet; static;
+    class function Dot: TCharSet; static;
     class function Comma: TCharSet; static;
+    class function SemiColon: TCharSet; static;
     class function Apostrophe: TCharSet; static;
+    class function SingleQuote: TCharSet; static;
     class function Hyphen: TCharSet; static;
     class function Underscore : TCharSet; static;
     class function Tilde : TCharSet; static;
+    class function Plus : TCharSet; static;
+    class function Minus : TCharSet; static;
+    class function CarriageReturn : TCharSet; static;
+    class function ClosingRoundBracket : TCharSet; static;
+    class function ClosingSquareBracket : TCharSet; static;
   end;
 
   TRegExMode = (remFreeSpacing);
@@ -47,8 +56,11 @@ type
     FRegEx : string;
   public
     property RegEx : string read FRegEx write FRegEx;
+    procedure AssertEquals(const inRegEx : string);
   public
     class operator Add(const inExpression1, inExpression2 : TRegExBuilder): TRegExBuilder;
+  strict private
+    function EscapeCharacters(const inText: string) : string;
   public
     function Literal(const inText : string) : TRegExBuilder;
     function CharSet(const inCharSet : TCharSet) : TRegExBuilder;
@@ -58,15 +70,23 @@ type
     function Group(const inExpression : TRegExBuilder) : TRegExBuilder;
     function Alternately: TRegExBuilder;
   public
-    function RepeatAtLeast(inQuantity : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
+    function RepeatAtLeast(inQuantity : integer; const inCharSet : TCharSet) : TRegExBuilder; overload;
+    function RepeatAtLeast(inQuantity : integer; const inExpression : TRegExBuilder) : TRegExBuilder; overload;
     function RepeatFor(inQuantity : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
     function RepeatBetween(inMin, inMax : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
   public
+    function WhitespaceAtLeast(inMin : integer) : TRegExBuilder;
+    function OptionalWhitespace : TRegExBuilder;
+    function Whitespace : TRegExBuilder;
+  public
     function WordBoundary : TRegExBuilder;
-    function Word(const inExpression : TRegExBuilder) : TRegExBuilder;
+    function Word(const inExpression : TRegExBuilder) : TRegExBuilder; overload;
+    function Word(const inLiteral : string) : TRegExBuilder; overload;
     function AtEndOfString : TRegExBuilder;
   public
     function AnyChar : TRegExBuilder;
+    function AnyWordChar : TRegExBuilder;
+    function AnyNonWordChar : TRegExBuilder;
     function AnyCharFrom(const inCharSet : TCharSet) : TRegExBuilder; overload;
     function AnyCharFrom(const inCharSets : array of TCharSet): TRegExBuilder; overload;
     function AnyCharExcept(const inCharSet : TCharSet) : TRegExBuilder; overload;
@@ -86,10 +106,14 @@ function Alternately: TRegExBuilder;
 function RepeatAtLeast(inQuantity : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
 function RepeatFor(inQuantity : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
 function RepeatBetween(inMin, inMax : integer; const inExpression : TRegExBuilder) : TRegExBuilder;
+function WhitespaceAtLeast(inMin : integer) : TRegExBuilder;
 function WordBoundary : TRegExBuilder;
-function Word(const inExpression : TRegExBuilder) : TRegExBuilder;
+function Word(const inExpression : TRegExBuilder) : TRegExBuilder; overload;
+function Word(const inLiteral : string) : TRegExBuilder; overload;
 function AtEndOfString : TRegExBuilder;
 function AnyChar : TRegExBuilder;
+function AnyWordChar : TRegExBuilder;
+function AnyNonWordChar : TRegExBuilder;
 function AnyCharFrom(const inCharSet : TCharSet) : TRegExBuilder; overload;
 function AnyCharFrom(const inCharSets : array of TCharSet): TRegExBuilder; overload;
 function AnyCharExcept(const inCharSet : TCharSet) : TRegExBuilder; overload;
@@ -145,10 +169,40 @@ begin
   Result.FInclusions := '''';
 end;
 
+class function TCharSet.SingleQuote : TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := '''';
+end;
+
+class function TCharSet.FullStop: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := '.';
+end;
+
+class function TCharSet.Dot: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := '.';
+end;
+
 class function TCharSet.Comma: TCharSet;
 begin
   Result.Clear;
   Result.FInclusions := ',';
+end;
+
+class function TCharSet.ClosingRoundBracket: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := ')';
+end;
+
+class function TCharSet.ClosingSquareBracket: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := ']';
 end;
 
 class function TCharSet.Digit(inMin, inMax: TDigit): TCharSet;
@@ -169,6 +223,18 @@ begin
   Result.FInclusions := '~';
 end;
 
+class function TCharSet.Plus: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := '+';
+end;
+
+class function TCharSet.Minus: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := '-';
+end;
+
 class function TCharSet.Letter(inLetter: TLetter): TCharSet;
 begin
   Result.Clear;
@@ -179,6 +245,12 @@ class function TCharSet.Letter(inMin, inMax: TLetter): TCharSet;
 begin
   Result.Clear;
   Result.FInclusions := inMin + '-' + inMax;
+end;
+
+class function TCharSet.SemiColon: TCharSet;
+begin
+  Result.Clear;
+  Result.FInclusions := ';';
 end;
 
 class function TCharSet.Space: TCharSet;
@@ -217,6 +289,12 @@ begin
   Result.FInclusions := '\W';
 end;
 
+class function TCharSet.CarriageReturn: TCharSet;
+begin
+  Result.Clear;
+  result.FInclusions := '\r';
+end;
+
 { TRegExBuilder }
 
 constructor TRegExBuilder.Build(inMode: TRegExModes);
@@ -229,6 +307,11 @@ begin
   Result.FRegEx := inExpression1.RegEx + inExpression2.RegEx;
 end;
 
+procedure TRegExBuilder.AssertEquals(const inRegEx: string);
+begin
+  Assert((inRegEx = FRegEx), Format('Expression %s does not match TRegExBuilder expression %s', [inRegEx, FRegEx]));
+end;
+
 function TRegExBuilder.Alternately: TRegExBuilder;
 begin
   FRegEx := FRegEx + '|';
@@ -238,6 +321,18 @@ end;
 function TRegExBuilder.AnyChar: TRegExBuilder;
 begin
   FRegEx := FRegEx + '.';
+  Result := Self;
+end;
+
+function TRegExBuilder.AnyWordChar: TRegExBuilder;
+begin
+  FRegEx := FRegEx + '\w';
+  Result := Self;
+end;
+
+function TRegExBuilder.AnyNonWordChar: TRegExBuilder;
+begin
+  FRegEx := FRegEx + '\W';
   Result := Self;
 end;
 
@@ -260,6 +355,34 @@ begin
   Result := Self;
 end;
 
+function TRegExBuilder.EscapeCharacters(const inText: string) : string;
+
+  function IsEscapableChar(inChar : char) : boolean; inline;
+  const
+    ESCAPABLE_CHARS : array[0..9] of char = ('[', ']', '(', ')', '\', '.', '+', '*', '{', '}');
+  var
+    i : integer;
+  begin
+    for i := Low(ESCAPABLE_CHARS) to High(ESCAPABLE_CHARS) do begin
+      if ESCAPABLE_CHARS[i] = inChar then
+        Exit(True);
+    end;
+    Result := False;
+  end;
+
+const
+  ESCAPE_CHAR = '\';
+var
+  c : Char;
+  i, escapeNeededAt : integer;
+begin
+  for c in inText do begin
+    if IsEscapableChar(c) then
+      Result := Result + ESCAPE_CHAR;
+    Result := Result + c;
+  end; // for
+end;
+
 function TRegExBuilder.AtEndOfString: TRegExBuilder;
 begin
   FRegEx := FRegEx + '$';
@@ -273,8 +396,11 @@ begin
 end;
 
 function TRegExBuilder.Literal(const inText: string): TRegExBuilder;
+var
+  escapedText : string;
 begin
-  FRegEx := FRegEx + inText;
+  escapedText := EscapeCharacters(inText);
+  FRegEx := FRegEx + escapedText;
   Result := Self;
 end;
 
@@ -331,6 +457,11 @@ begin
   Result := Self;
 end;
 
+function TRegExBuilder.RepeatAtLeast(inQuantity: integer; const inCharSet : TCharSet): TRegExBuilder;
+begin
+  Result := RepeatAtLeast(inQuantity, NewRegEx.CharSet(inCharSet));
+end;
+
 function TRegExBuilder.RepeatBetween(inMin, inMax: integer; const inExpression: TRegExBuilder): TRegExBuilder;
 begin
   FRegEx := FRegEx + inExpression.RegEx + '{' + IntToStr(inMin) + ',' + IntToStr(inMax) + '}';
@@ -343,9 +474,30 @@ begin
   Result := Self;
 end;
 
+function TRegExBuilder.WhitespaceAtLeast(inMin: integer): TRegExBuilder;
+begin
+  Result := RepeatAtLeast(inMin, NewRegEx.CharSet(TCharSet.AnyWhiteSpace));
+end;
+
+function TRegExBuilder.OptionalWhitespace: TRegExBuilder;
+begin
+  Result := WhitespaceAtLeast(0);
+end;
+
+function TRegExBuilder.Whitespace: TRegExBuilder;
+begin
+  Result := WhitespaceAtLeast(1);
+end;
+
 function TRegExBuilder.Word(const inExpression: TRegExBuilder): TRegExBuilder;
 begin
   FRegEx := FRegEx + '\b' + inExpression.RegEx + '\b';
+  Result := Self;
+end;
+
+function TRegExBuilder.Word(const inLiteral : string) : TRegExBuilder;
+begin
+  FRegEx := FRegEx + '\b' + EscapeCharacters(inLiteral) + '\b';
   Result := Self;
 end;
 
@@ -363,6 +515,16 @@ end;
 function AnyChar : TRegExBuilder;
 begin
   Result := NewRegEx.AnyChar;
+end;
+
+function AnyWordChar : TRegExBuilder;
+begin
+  Result := NewRegEx.AnyWordChar;
+end;
+
+function AnyNonWordChar : TRegExBuilder;
+begin
+  Result := NewRegEx.AnyNonWordChar;
 end;
 
 function AnyCharFrom(const inCharSet : TCharSet) : TRegExBuilder;
@@ -430,6 +592,11 @@ begin
   Result := NewRegEx.RepeatBetween(inMin, inMax, inExpression);
 end;
 
+function WhitespaceAtLeast(inMin : integer) : TRegExBuilder;
+begin
+  Result := NewRegEx.WhitespaceAtLeast(inMin);
+end;
+
 function WordBoundary : TRegExBuilder;
 begin
   Result := NewRegEx.WordBoundary;
@@ -438,6 +605,11 @@ end;
 function Word(const inExpression : TRegExBuilder) : TRegExBuilder;
 begin
   Result := NewRegEx.Word(inExpression);
+end;
+
+function Word(const inLiteral : string) : TRegExBuilder;
+begin
+  Result := NewRegEx.Word(inLiteral);
 end;
 
 function AtEndOfString : TRegExBuilder;
